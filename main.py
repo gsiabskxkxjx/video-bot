@@ -1,0 +1,74 @@
+import os
+import random
+import requests
+import asyncio
+import subprocess
+import telebot
+import edge_tts
+
+BOT_TOKEN = "8607617237:AAFKkeTjLhB7LVQPHBzmu7ERKe8_euMYTrY"
+bot = telebot.TeleBot(BOT_TOKEN)
+
+STOCK_VIDEOS = [
+    "https://assets.mixkit.co/videos/preview/mixkit-timelapse-of-clouds-in-a-blue-sky-2408-large.mp4",
+    "https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-4000-large.mp4",
+    "https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4"
+]
+
+def get_free_ai_text(prompt):
+    url = f"https://text.pollinations.ai/{requests.utils.quote(prompt)}"
+    system_prompt = "أنت مساعد لتوليد محتوى الفيديوهات. أخرج النتيجة حصراً بهذا النسق بدون مقدمات:\n[VOICEOVER]\n(نص صوتي مشوق باللغة العربية للتعليق الصوتي)\n[CAPTION]\n(كابشن تيك توك مع هاشتاغات)"
+    full_url = f"{url}?system={requests.utils.quote(system_prompt)}"
+    res = requests.get(full_url)
+    return res.text
+
+async def make_audio(text):
+    tts = edge_tts.Communicate(text, voice="ar-EG-SalmaNeural")
+    await tts.save("voice.mp3")
+
+def download_bg_video():
+    video_url = random.choice(STOCK_VIDEOS)
+    res = requests.get(video_url, stream=True)
+    with open("bg.mp4", "wb") as f:
+        for chunk in res.iter_content(chunk_size=1024*1024):
+            if chunk:
+                f.write(chunk)
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    status_msg = bot.reply_to(message, "⏳ جاري توليد المحتوى بالذكاء الاصطناعي...")
+
+    try:
+        ai_response = get_free_ai_text(message.text)
+        if "[VOICEOVER]" in ai_response and "[CAPTION]" in ai_response:
+            voice_part = ai_response.split("[VOICEOVER]")[1].split("[CAPTION]")[0].strip()
+            caption_part = ai_response.split("[CAPTION]")[1].strip()
+        else:
+            voice_part = ai_response[:150]
+            caption_part = ai_response
+
+        bot.edit_message_text("🎙️ جاري إنشاء التعليق الصوتي...", message.chat.id, status_msg.message_id)
+        asyncio.run(make_audio(voice_part))
+
+        bot.edit_message_text("📥 جاري تحميل فيديو خلفية مناسب...", message.chat.id, status_msg.message_id)
+        download_bg_video()
+
+        bot.edit_message_text("🎬 جاري دمج الفيديو والصوت معاً...", message.chat.id, status_msg.message_id)
+        cmd = 'ffmpeg -y -i bg.mp4 -i voice.mp3 -c:v copy -c:a aac -shortest output.mp4'
+        subprocess.run(cmd, shell=True)
+
+        bot.edit_message_text("📤 جاري رفع الفيديو إليك...", message.chat.id, status_msg.message_id)
+        with open("output.mp4", "rb") as video_file:
+            bot.send_video(message.chat.id, video_file, caption=caption_part)
+            
+        bot.delete_message(message.chat.id, status_msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ حدث خطأ: {str(e)}", message.chat.id, status_msg.message_id)
+    finally:
+        for f in ["voice.mp3", "bg.mp4", "output.mp4"]:
+            if os.path.exists(f):
+                os.remove(f)
+
+print("البوت السحابي يعمل الآن بنجاح...")
+bot.infinity_polling()
