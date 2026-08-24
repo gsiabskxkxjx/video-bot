@@ -27,7 +27,6 @@ def handle_message(message):
     status_msg = bot.reply_to(message, "⏳ جاري توليد المحتوى بالذكاء الاصطناعي...")
 
     try:
-        # 1. توليد النص
         ai_response = get_free_ai_text(message.text)
         if "[VOICEOVER]" in ai_response and "[CAPTION]" in ai_response:
             voice_part = ai_response.split("[VOICEOVER]")[1].split("[CAPTION]")[0].strip()
@@ -36,14 +35,12 @@ def handle_message(message):
             voice_part = ai_response[:150]
             caption_part = ai_response
 
-        # 2. إنشاء الصوت
         bot.edit_message_text("🎙️ جاري إنشاء التعليق الصوتي...", message.chat.id, status_msg.message_id)
         asyncio.run(make_audio(voice_part))
 
-        # 3. دمج الصوت مع فيديو خلفية سينمائي يتم إنشاؤه تلقائياً بدون تحميل
         bot.edit_message_text("🎬 جاري إنشاء الفيديو والدمج...", message.chat.id, status_msg.message_id)
         
-        # أمر FFmpeg يولد خلفية متدرجة متحركة بنمط تيك توك ومقاس عمودي 1080x1920 وبنفس طول الصوت
+        # إنشاء خلفية فيديو متحركة عمودية 1080x1920 تلقائياً بواسطة FFmpeg
         cmd = (
             'ffmpeg -y -i voice.mp3 '
             '-f lavfi -i "cellauto=s=1080x1920:rule=30:rate=10,format=pix_fmts=yuv420p" '
@@ -51,7 +48,6 @@ def handle_message(message):
         )
         subprocess.run(cmd, shell=True, check=True)
 
-        # 4. إرسال الفيديو النهائي
         bot.edit_message_text("📤 جاري رفع الفيديو إليك...", message.chat.id, status_msg.message_id)
         with open("output.mp4", "rb") as video_file:
             bot.send_video(message.chat.id, video_file, caption=caption_part)
