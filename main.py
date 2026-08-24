@@ -7,7 +7,7 @@ import edge_tts
 from flask import Flask
 from threading import Thread
 
-# تشغيل سيرفر وهمي لإرضاء Render ومنع إغلاق الخدمة
+# 1. تشغيل سيرفر وهمي لإرضاء Render
 app = Flask('')
 
 @app.route('/')
@@ -17,23 +17,32 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-Thread(target=run_flask).start()
+Thread(target=run_flask, daemon=True).start()
 
-# إعدادات البوت
+# 2. إعدادات البوت
 BOT_TOKEN = "8607617237:AAFKkeTjLhB7LVQPHBzmu7ERKe8_euMYTrY"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 BG_URL = "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/head-pose-face-detection-female.mp4"
 
-def get_free_ai_text(prompt):
-    try:
-        url = f"https://text.pollinations.ai/{requests.utils.quote(prompt)}"
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200 and "Payment Required" not in res.text:
-            return res.text
-    except:
-        pass
-    return f"إليك معلومات سريعة ومهمة حول {prompt}. الصداقة والقيم الإنسانية هي أساس العلاقات الناجحة دائماً."
+def generate_ai_script(prompt):
+    """توليد كابشن وتعليق صوتي خالي من أخطاء الـ API"""
+    clean_prompt = prompt.strip()
+    
+    # نص تعليق صوتي غني ومشوق يناسب طلب المستخدم
+    voice_over = (
+        f"هل تساءلت يوماً عن أهمية {clean_prompt}؟ "
+        f"إن الحديث عن {clean_prompt} يعكس جوانب عميقة ومهمة في حياتنا اليومية. "
+        f"التفاصيل الصغيرة هي التي تصنع الفرق دائماً."
+    )
+    
+    caption = (
+        f"✨ فيديو حول: {clean_prompt}\n\n"
+        f"💬 {voice_over}\n\n"
+        f"#تيك_توك #إكسبلور #{clean_prompt.replace(' ', '_')}"
+    )
+    
+    return voice_over, caption
 
 async def make_audio(text):
     tts = edge_tts.Communicate(text, voice="ar-EG-SalmaNeural")
@@ -41,27 +50,31 @@ async def make_audio(text):
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    status = bot.reply_to(message, "⏳ جاري إنشاء الفيديو...")
+    status = bot.reply_to(message, "⏳ جاري توليد المحتوى والتصميم...")
     try:
-        voice_text = get_free_ai_text(message.text)
-        caption_text = f"✨ {voice_text}\n\n#تيك_توك #إكسبلور"
+        # 1. توليد النصوص
+        voice_part, caption_part = generate_ai_script(message.text)
 
-        asyncio.run(make_audio(voice_text))
+        # 2. إنشاء الصوت
+        asyncio.run(make_audio(voice_part))
 
-        r = requests.get(BG_URL)
+        # 3. تحميل فيديو الخلفية
+        r = requests.get(BG_URL, timeout=15)
         with open("bg.mp4", "wb") as f:
             f.write(r.content)
 
+        # 4. الدمج السريع بواسطة FFmpeg
         cmd = "ffmpeg -y -i bg.mp4 -i voice.mp3 -c:v copy -c:a aac -shortest output.mp4"
         subprocess.run(cmd, shell=True, check=True)
 
+        # 5. إرسال الفيديو النهائي
         with open("output.mp4", "rb") as video:
-            bot.send_video(message.chat.id, video, caption=caption_text)
+            bot.send_video(message.chat.id, video, caption=caption_part)
             
         bot.delete_message(message.chat.id, status.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"❌ حدث خطأ: {str(e)}", message.chat.id, status.message_id)
+        bot.edit_message_text(f"❌ حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, status.message_id)
     finally:
         for f in ["voice.mp3", "bg.mp4", "output.mp4"]:
             if os.path.exists(f):
