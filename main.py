@@ -4,7 +4,22 @@ import asyncio
 import subprocess
 import telebot
 import edge_tts
+from flask import Flask
+from threading import Thread
 
+# تشغيل سيرفر وهمي لإرضاء Render ومنع إغلاق الخدمة
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running live!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+Thread(target=run_flask).start()
+
+# إعدادات البوت
 BOT_TOKEN = "8607617237:AAFKkeTjLhB7LVQPHBzmu7ERKe8_euMYTrY"
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -12,28 +27,13 @@ BG_URL = "https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/maste
 
 def get_free_ai_text(prompt):
     try:
-        # استخدام واجهةDuckDuckGo / DDG AI النصية المجانية المباشرة
-        url = "https://html.duckduckgo.com/html/"
-        # توليد نص بسيط ومباشر
-        res = requests.post(
-            "https://genai-api.duckduckgo.com/v1/chat",
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "user", "content": f"اكتب نص تعليق صوتي قصير ومشوق باللغة العربية عن: {prompt}"}
-                ]
-            },
-            headers={"x-vnet-bypass": "1"},
-            timeout=10
-        )
-        if res.status_code == 200:
-            text = res.json().get("message", "")
-            return text
+        url = f"https://text.pollinations.ai/{requests.utils.quote(prompt)}"
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200 and "Payment Required" not in res.text:
+            return res.text
     except:
         pass
-    
-    # نص افتراضي احتياطي ممتازة في حال تعثر الاتصال
-    return f"الصداقة هي إحدى أجمل العلاقات الإنسانية وأعمقها قيمة. الصديق الحقيقي هو السند في الأوقات الصعبة والشريك في اللحظات السعيدة."
+    return f"إليك معلومات سريعة ومهمة حول {prompt}. الصداقة والقيم الإنسانية هي أساس العلاقات الناجحة دائماً."
 
 async def make_audio(text):
     tts = edge_tts.Communicate(text, voice="ar-EG-SalmaNeural")
@@ -43,25 +43,20 @@ async def make_audio(text):
 def handle_message(message):
     status = bot.reply_to(message, "⏳ جاري إنشاء الفيديو...")
     try:
-        # 1. جلب النص
         voice_text = get_free_ai_text(message.text)
-        caption_text = f"✨ {message.text}\n\n#تيك_توك #إكسبلور #فيديو"
+        caption_text = f"✨ {voice_text}\n\n#تيك_توك #إكسبلور"
 
-        # 2. إنشاء الصوت
         asyncio.run(make_audio(voice_text))
 
-        # 3. تحميل خلفية الفيديو
         r = requests.get(BG_URL)
         with open("bg.mp4", "wb") as f:
             f.write(r.content)
 
-        # 4. دمج الصوت مع الفيديو بسرعة وبدون استهلاك ذاكرة
         cmd = "ffmpeg -y -i bg.mp4 -i voice.mp3 -c:v copy -c:a aac -shortest output.mp4"
         subprocess.run(cmd, shell=True, check=True)
 
-        # 5. إرسال الفيديو والنص
         with open("output.mp4", "rb") as video:
-            bot.send_video(message.chat.id, video, caption=f"{voice_text}\n\n{caption_text}")
+            bot.send_video(message.chat.id, video, caption=caption_text)
             
         bot.delete_message(message.chat.id, status.message_id)
 
